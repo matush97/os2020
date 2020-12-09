@@ -5,6 +5,14 @@
 #include "riscv.h"
 #include "defs.h"
 #include "fs.h"
+#include "vm.h"
+#include "spinlock.h"
+#include "proc.h"
+
+#define NVMA 16
+struct mmap_vma mmap_vma[NVMA];
+struct mmap_vma *vma_freelist;
+struct spinlock vma_lock;
 
 /*
  * the kernel's page table.
@@ -54,6 +62,39 @@ void
 kvminit(void)
 {
   kernel_pagetable = kvmmake();
+}
+
+void 
+vmainit(void)
+{
+  initlock(&vma_lock,"vma");
+  for (int i=0; i < NVMA; i++){
+    mmap_vma[i].next = vma_freelist;
+    vma_freelist = mmap_vma + i;
+  }
+}
+
+//ziskanie vma a spatne vlozenie 
+struct mmap_vma*
+get_vma(void)
+{
+  struct mmap_vma *vma;
+  acquire(&vma_lock);
+  vma = vma_freelist;
+  if (vma){
+    vma_freelist = vma->next;
+  }
+  release(&vma_lock);  
+  return vma;
+}
+
+void 
+put_vma(struct mmap_vma *vma)
+{
+  acquire(&vma_lock);
+  vma->next = vma_freelist;
+  vma_freelist = vma;
+  release(&vma_lock);  
 }
 
 // Switch h/w page table register to the kernel's page table,
@@ -154,6 +195,46 @@ mappages(pagetable_t pagetable, uint64 va, uint64 size, uint64 pa, int perm)
     pa += PGSIZE;
   }
   return 0;
+}
+
+uint64
+vma_min_address(struct proc *p)
+{
+  struct mmap_vma *vma;
+  uint64 min_addr = TRAPFRAME;
+  for (vma = p->vma_list.next; vma != &p->vma_list; vma = vma->next){
+    if(min_addr > vma->addr)
+      min_addr = vma->addr;
+  }
+  return min_addr;
+}
+
+uint64
+vma_map(struct proc *p,struct file *f,int length,int prot, int flags)
+{
+  // TODO: check permissions
+  // find region
+  uint64 min_address = vma_min_address(p);
+  min_address = PGROUNDDOWN(min_address - length);
+  if (p->sz > min_address)
+    return -1;
+  // alloc and fill vma
+  struct mmap_vma *vma = get_vma();
+  if (vma == 0)
+    return -1;
+  vma->addr = min_address;
+  vma->length = length;
+  vma->protection = prot;
+  vma->flags = flags;
+  vma->file = f;
+
+  vma->next = p->vma_list.next;
+  vma->prev = &p->vma_list;
+  p->vma_list.next->prev = vma;
+  p->vma_list.next = vma;
+  // fileup
+  filedup(f);
+  return min_address; 
 }
 
 // Remove npages of mappings starting from va. va must be

@@ -464,7 +464,7 @@ itrunc(struct inode *ip)
     for(j = 0; j < NINDIRECT; j++){
       if(a[j]){
 	bp2 = bread(ip->dev, a[j]);
-	a2 = (uint*)bp->data;
+	a2 = (uint*)bp2->data;
 	for(i = 0; i < NINDIRECT; i++){
 	  if(a2[i])
 	    bfree(ip->dev, a2[i]);

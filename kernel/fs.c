@@ -379,6 +379,7 @@ bmap(struct inode *ip, uint bn)
 {
   uint addr, *a;
   struct buf *bp;
+  uint variableA,variableB,variableC; //pomocne premenne pre pracu s blokmi A,B,C
 
   if(bn < NDIRECT){
     if((addr = ip->addrs[bn]) == 0)
@@ -402,8 +403,58 @@ bmap(struct inode *ip, uint bn)
   }
   
   bn -= NINDIRECT;
+  
+  //hladanie v Tripple indirect block
+  if(bn < NTINDIRECT){
+    variableA = bn/NDINDIRECT; //variableA som pouzival pre BLOK A
+    variableB = bn - (NDINDIRECT * variableA);  // vypocet pre blok B v bloku B som ho este podelil NINDIRECT
+    uint helpB = variableB / NINDIRECT; //pouzival len na vyprintovanie
+    variableC = variableB % NINDIRECT; //poslednom bloku 
+    
+    // Load indirect block, allocating if necessary.
+    // moj blok A
+    if((addr = ip->addrs[NDIRECT + 1]) == 0)
+      ip->addrs[NDIRECT + 1] = addr = balloc(ip->dev);
+    bp = bread(ip->dev, addr); 
+    a = (uint*)bp->data;       
+    //variableA = bn/NDINDIRECT;
+    if((addr = a[variableA]) == 0){ 
+      a[variableA] = addr = balloc(ip->dev); 
+      log_write(bp); 
+    }
+    brelse(bp); 
+    
+    //moj blok B
+    bp = bread(ip->dev, addr); 
+    a = (uint*)bp->data;       
+    //variableB = bn - (NDINDIRECT * variableA);
+    if((addr = a[variableB / NINDIRECT]) == 0){ //dalo sa pouzit aj helpB
+      a[variableB / NINDIRECT] = addr = balloc(ip->dev);
+      log_write(bp); 
+    }
+    brelse(bp); 
 
-  if(bn < NDINDIRECT){
+    //moj blok C - posledny v triple indirect 
+    bp = bread(ip->dev, addr); 
+    a = (uint*)bp->data;       
+    //variableC = variableB % NINDIRECT;
+    if((addr = a[variableC]) == 0){ 
+      a[variableC] = addr = balloc(ip->dev);
+      printf("%d %d %d \n",variableA, helpB,variableC); //sluzilo mi to na vyprintovanie 
+      log_write(bp); 
+    }
+    brelse(bp); 
+
+    return addr;
+  }
+
+
+  //uint del,mod;
+  /*if(bn < NDINDIRECT){
+    //del = bn / NINDIRECT;
+    //mod = bn % NINDIRECT;  
+    //printf("%d %d \n", del,mod);
+
     // Load double indirect block, allocating if necessary.
     if((addr = ip->addrs[NDIRECT + 1]) == 0)
       ip->addrs[NDIRECT + 1] = addr = balloc(ip->dev);
@@ -425,7 +476,7 @@ bmap(struct inode *ip, uint bn)
     brelse(bp); //uvolnime buffer ked skoncime pracu s nim
 
     return addr;
-  }
+  }*/
 
   panic("bmap: out of range");
 }
@@ -435,9 +486,9 @@ bmap(struct inode *ip, uint bn)
 void
 itrunc(struct inode *ip)
 {
-  int i, j;
-  struct buf *bp,*bp2;
-  uint *a,*a2;
+  int i, j, k;
+  struct buf *bp,*bp2,*bp3;
+  uint *a,*a2,*a3;
 
   for(i = 0; i < NDIRECT; i++){
     if(ip->addrs[i]){
@@ -458,7 +509,37 @@ itrunc(struct inode *ip)
     ip->addrs[NDIRECT] = 0;
   }
   
-  if(ip->addrs[NDIRECT + 1]){
+  // kod som pouzil s double indirect len som doplnil dalsi for cyklus
+  // a pouzivanie a uvolnovanie buffrov 
+  if(ip->addrs[NDIRECT + 1]){ //NDIRECT + 1 sa nachadza moja Triple indirect tabulka, namiesto double
+    bp = bread(ip->dev, ip->addrs[NDIRECT + 1]);
+    a = (uint*)bp->data;
+    for(j = 0; j < NINDIRECT; j++){
+      if(a[j]){ //a[j] - prvy blok tabulky
+	bp2 = bread(ip->dev, a[j]);
+	a2 = (uint*)bp2->data;
+	for(i = 0; i < NINDIRECT; i++){
+	  if(a2[i]){  //a2[i] - druhy blok
+	    bp3 = bread(ip->dev, a2[i]);
+	    a3 = (uint*)bp3->data;
+	    for(k = 0; k < NINDIRECT; k++){
+	      if(a3[k]) // treti (posledny blok) nasej triple indirect tabulky
+		bfree(ip->dev, a3[k]); //uvolni tabulku 
+	    }
+	    brelse(bp3);
+	    bfree(ip->dev, a2[i]);
+	  }
+	}
+	brelse(bp2);
+	bfree(ip->dev, a[j]);
+      }    
+    }
+    brelse(bp);
+    bfree(ip->dev, ip->addrs[NDIRECT + 1]);
+    ip->addrs[NDIRECT + 1] = 0;
+  }
+
+  /*if(ip->addrs[NDIRECT + 1]){
     bp = bread(ip->dev, ip->addrs[NDIRECT + 1]);
     a = (uint*)bp->data;
     for(j = 0; j < NINDIRECT; j++){
@@ -476,7 +557,7 @@ itrunc(struct inode *ip)
     brelse(bp);
     bfree(ip->dev, ip->addrs[NDIRECT + 1]);
     ip->addrs[NDIRECT + 1] = 0;
-  }
+  }*/
 
 
   ip->size = 0;

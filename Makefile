@@ -176,6 +176,7 @@ UPROGS=\
 	$U/_wc\
 	$U/_zombie\
 	$U/_symlinktest\
+	$U/_bigfile\
 
 
 

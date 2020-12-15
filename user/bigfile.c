@@ -28,7 +28,8 @@ main()
   }
 
   printf("\nwrote %d blocks\n", blocks);
-  if(blocks != 65803) {
+  //if(blocks != 65803) {
+  if(blocks != 16777483) { //256*256*256+256+11
     printf("bigfile: file is too small\n");
     exit(-1);
   }
